@@ -16,30 +16,35 @@
   </head>
   <body>
     <h2>Face Detection with Human.js</h2>
+
     <video
       id="video"
       autoplay
       muted
       playsinline
-      width="640"
-      height="480"
+      width="720"
+      height="540"
     ></video>
-    <canvas id="overlay" width="640" height="480"></canvas>
+    <canvas id="overlay" width="720" height="540"></canvas>
 
     <script>
       const human = new Human.Human({
-        backend: "webgl",
-        modelBasePath: "https://vladmandic.github.io/human/models", // load from CDN
+        backend: "cpu",
+        modelBasePath: "https://vladmandic.github.io/human/models",
         cacheModels: true,
         face: {
           enabled: true,
           detector: { rotation: false },
-          mesh: true, // optional: set to true if you want 3D face mesh
-          emotion: {
-            enabled: true,
-          },
+          mesh: true,
+          emotion: { enabled: true },
+          gender: { enabled: true },
+          age: { enabled: true },
         },
+        age: { enabled: true },
+        gender: { enabled: true },
       });
+
+      console.log(human.models.loaded);
 
       const video = document.getElementById("video");
       const canvas = document.getElementById("overlay");
@@ -57,8 +62,10 @@
 
       async function run() {
         await human.load();
+        await human.warmup();
         await setupCamera();
         detect();
+        console.log("Loaded models:", human.models.loaded);
       }
 
       async function detect() {
@@ -66,36 +73,84 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         for (const face of result.face) {
-          const { box, keypoints, emotion } = face;
+          console.log("Detected face:", face);
+          const { box, score, emotion, keypoints } = face;
+          const [x, y, width, height] = box;
 
-          // Draw face box
+          // Draw bounding box
           ctx.strokeStyle = "red";
           ctx.lineWidth = 3;
-          ctx.strokeRect(box[0], box[1], box[2], box[3]);
+          ctx.strokeRect(x, y, width, height);
 
-          // Draw face label
-          ctx.font = "18px Arial";
-          ctx.fillStyle = "red";
-          ctx.fillText("Face", box[0], box[1] - 10);
-
-          // Only draw keypoints if they exist and are an array
+          // Draw keypoints
           if (Array.isArray(keypoints)) {
             ctx.fillStyle = "blue";
             for (const pt of keypoints) {
               ctx.beginPath();
-              ctx.arc(pt.position[0], pt.position[1], 2, 0, 2 * Math.PI);
+              ctx.arc(pt.position[0], pt.position[1], 1.5, 0, 2 * Math.PI);
               ctx.fill();
             }
           }
 
-          // Display top emotion
+          // Format overlay info
+          const infoLines = [];
+          infoLines.push(`🧠 Score: ${(score * 100).toFixed(1)}%`);
+
+          // Emotion
           if (Array.isArray(emotion) && emotion.length > 0) {
-            ctx.fillStyle = "green";
-            ctx.fillText(`Emotion: ${emotion[0].emotion}`, box[0], box[1] - 30);
+            const topEmotion = emotion[0];
+            infoLines.push(`😊 Emotion: ${topEmotion.emotion}`);
+            infoLines.push(`📊 Confidence: ${(topEmotion.score * 100).toFixed(1)}%`);
           }
+
+          // Gender
+          if (face.gender && typeof face.gender.gender === "string") {
+            infoLines.push(`👤 Gender: ${face.gender.gender}`);
+            if (typeof face.gender.score === "number") {
+              infoLines.push(`📏 Gender Conf: ${(face.gender.score * 100).toFixed(1)}%`);
+            }
+          } else {
+            infoLines.push(`👤 Gender: Not detected`);
+          }
+
+          // Age
+          if (face.age && typeof face.age.age === "number" && !isNaN(face.age.age)) {
+            infoLines.push(`🎂 Age: ${face.age.age.toFixed(1)}`);
+            if (typeof face.age.score === "number") {
+              infoLines.push(`📏 Age Conf: ${(face.age.score * 100).toFixed(1)}%`);
+            }
+          } else {
+            infoLines.push(`🎂 Age: Not detected`);
+          }
+
+          // Calculate info panel position to avoid going off canvas
+          let infoX = x + width + 10;
+          const infoWidth = 180;
+          const infoHeight = infoLines.length * 22 + 10;
+
+          if (infoX + infoWidth > canvas.width) {
+            // Draw to the left of the box if too close to right edge
+            infoX = x - infoWidth - 10;
+            if (infoX < 0) infoX = 10; // clamp to left side inside canvas
+          }
+
+          // Draw info panel background
+          ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+          ctx.fillRect(infoX, y, infoWidth, infoHeight);
+
+          // Optional: draw border around info panel to see edges clearly
+          // ctx.strokeStyle = "yellow";
+          // ctx.lineWidth = 1;
+          // ctx.strokeRect(infoX, y, infoWidth, infoHeight);
+
+          // Draw info text
+          ctx.fillStyle = "white";
+          ctx.font = "16px Consolas";
+          infoLines.forEach((line, i) => {
+            ctx.fillText(line, infoX + 10, y + 25 + i * 22);
+          });
         }
 
-        console.log(result.face);
         requestAnimationFrame(detect);
       }
 
